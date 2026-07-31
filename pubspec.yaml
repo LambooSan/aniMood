@@ -1,0 +1,42 @@
+name: animood
+description: >
+  AniMood — универсальный AIO-агрегатор аниме, дорам, манги, манхвы,
+  комиксов и ранобэ для Android, Android TV и десктопа (AniMood MAX).
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Навигация
+  go_router: ^14.0.0
+  # Локальное хранилище (история/закладки/кеш метаданных).
+  # sqflite не имеет реализации под Linux/Windows — на десктопе используется
+  # sqflite_common_ffi (тот же API поверх sqlite3 через FFI).
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.4.2
+  path: ^1.9.1
+  path_provider: ^2.1.0
+  # Сеть — HTTP(S) + системный proxy/SOCKS5
+  dio: ^5.4.0
+  # Обход Cloudflare/DDoS-Guard через системный WebView
+  webview_flutter: ^4.7.0
+  # Видеоплеер — media_kit (libmpv), работает на Android/iOS/Linux/Windows/macOS
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
+  # Управление состоянием
+  flutter_riverpod: ^2.5.0
+  collection: ^1.19.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
