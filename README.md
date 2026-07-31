@@ -1,31 +1,60 @@
-# AniMood — каркас приложения
+# AniMood
 
-Кроссплатформенный каркас (Flutter/Dart) под Android, Android TV и десктоп
-(AniMood MAX), реализующий структуру, описанную в
+Кроссплатформенный каркас (Flutter/Dart) приложения-агрегатора аниме,
+дорам, манги, манхвы и ранобэ — под Android, Android TV и десктоп
+(AniMood MAX: Windows/Linux/macOS). Реализует архитектуру, описанную в
 [docs/architecture.md](docs/architecture.md) и
 [docs/documentation.md](docs/documentation.md).
 
-Видеовоспроизведение (`VideoPlayerEngine`), локальное хранилище
-(`LocalStorage`) и первый источник данных (`JikanSourceModule`) — уже
-рабочие реализации, не заглушки: проверены полным циклом сборки и запуска
-(см. "Что уже проверено"). Остальное — контракты (абстрактные классы),
-нормализованные модели данных и UI-навигация под три платформы.
+## Статус
 
-## Структура
+| Компонент | Статус |
+|---|---|
+| `VideoPlayerEngine` (media_kit) | Рабочая реализация |
+| `LocalStorage` (sqflite) | Рабочая реализация |
+| `JikanSourceModule` (метаданные, MyAnimeList) | Рабочая реализация |
+| `AnilibriaSourceModule` (видео + метаданные) | Рабочая реализация |
+| `ReaderEngine`, `TtsEngine` | Контракт (интерфейс), реализации нет |
+| `BackupService` | Контракт, реализации нет |
+| `TrackerProvider` (Shikimori/AniList/MAL/MyDramaList) | Контракт + заглушки, без OAuth |
+| `WebViewBypassService` | Контракт, реализации нет |
+| Субтитры (.ass/.srt) | Не реализовано |
+
+## Требования
+
+- Flutter SDK ≥ 3.19 (Dart ≥ 3.3)
+- Для сборки под Linux: `libmpv-dev` (используется `media_kit` для
+  видеовоспроизведения)
+
+```bash
+sudo apt-get install libmpv-dev
+```
+
+## Установка и запуск
+
+```bash
+# Нативные platform-папки (android/, linux/) уже сгенерированы в этом
+# репозитории. Для остальных платформ — при необходимости:
+flutter create --project-name animood --org com.animood .
+
+flutter pub get
+
+flutter run                 # подключённое устройство/эмулятор
+flutter run -d linux        # десктоп (нужен libmpv-dev)
+```
+
+## Структура проекта
 
 ```
 lib/
   core/
     models/       # Title, Entry, Resource — единая нормализованная модель
-    parser/       # ParserEngine, SourceModule (контракт), ModuleRegistry;
-                  #   JikanSourceModule (impl/) — рабочий источник данных
-                  #   на публичном API Jikan (MyAnimeList); parser_provider.dart
-    engines/      # ReaderEngine, TtsEngine (контракты);
-                  # VideoPlayerEngine — контракт + рабочая реализация
-                  #   на media_kit в engines/impl/
-    storage/      # LocalStorage (контракт) + рабочая реализация на sqflite
-                  #   в storage/impl/; BackupService (контракт);
-                  #   local_storage_provider.dart — riverpod Provider
+    parser/       # ParserEngine, SourceModule (контракт), ModuleRegistry
+      impl/       #   JikanSourceModule, AnilibriaSourceModule
+    engines/      # VideoPlayerEngine (контракт), ReaderEngine, TtsEngine
+      impl/       #   PackageVideoPlayerEngine — реализация на media_kit
+    storage/      # LocalStorage (контракт), BackupService (контракт)
+      impl/       #   SqfliteLocalStorage — реализация на sqflite
     tracking/     # TrackingService, TrackerProvider + заглушки провайдеров
     network/      # ApiClient (proxy/SOCKS5), WebViewBypassService (контракт)
   features/       # Экраны: home, search, player, reader, library, settings
@@ -35,113 +64,92 @@ lib/
 ```
 
 Каждый файл ссылается в докстринге на соответствующий раздел
-`docs/architecture.md`, чтобы не расходиться с ним по терминологии.
+`docs/architecture.md`.
 
-## Видеодвижок: media_kit, не video_player
+## Технические решения
 
-Пакет `video_player` **не имеет реализации для Linux/Windows-десктопа**
-(federated-плагины есть только под Android/iOS/Web) — это выяснилось при
-попытке реально запустить `PlayerScreen`: `VideoPlayerPlatform.init()`
-кидал `UnimplementedError` на Linux. Поскольку AniMood MAX должен работать
-на десктопе (docs/architecture.md, п.9), видеодвижок переведён на
-[`media_kit`](https://pub.dev/packages/media_kit) (обёртка над libmpv) —
-он реально поддерживает Android/iOS/Linux/Windows/macOS одним и тем же
-кодом. Реализация — `lib/core/engines/impl/package_video_player_engine.dart`.
+### Видео: media_kit вместо video_player
 
-**Системная зависимость для сборки под Linux:** нужен `libmpv-dev` (иначе
-CMake упадёт на этапе линковки `media_kit_video_plugin`):
+`video_player` не имеет реализации для Linux/Windows-десктопа
+(federated-плагины покрывают только Android/iOS/Web). Видеодвижок
+реализован на [`media_kit`](https://pub.dev/packages/media_kit)
+(обёртка над libmpv), который поддерживает Android/iOS/Linux/Windows/macOS
+единым кодом.
+
+Реализация: `lib/core/engines/impl/package_video_player_engine.dart`.
+
+### Хранилище: sqflite + sqflite_common_ffi
+
+`sqflite` также не имеет реализации под Linux/Windows. На десктопе
+`SqfliteLocalStorage.open()` переключает `databaseFactory` на
+`sqflite_common_ffi` (sqlite3 через FFI); на Android/iOS используется
+штатный `sqflite`. `LocalStorage` доступен экранам через `flutter_riverpod`
+(`local_storage_provider.dart`).
+
+Реализация: `lib/core/storage/impl/sqflite_local_storage.dart`.
+
+### Source Modules
+
+**`JikanSourceModule`** — источник метаданных на публичном API
+[Jikan](https://jikan.moe) (неофициальная REST-обёртка над MyAnimeList,
+без ключей). Реализует `search`/`getDetails`/`getEntries` на реальных
+данных; `resolveEntry` возвращает демонстрационный видеопоток — у Jikan
+нет собственного видеохостинга.
+
+> Живые (не кешируемые на стороне Jikan) эндпоинты — `/anime?q=` и
+> `/anime/{id}/episodes` — возвращают HTTP 504, если запрос содержит
+> заголовок `Accept-Encoding` (с любым значением). `dart:io`'s
+> `HttpClient` всегда отправляет `Accept-Encoding: gzip`, независимо от
+> `autoUncompress`. Поэтому модуль использует сырой `dart:io HttpClient`
+> с явным `request.headers.removeAll(HttpHeaders.acceptEncodingHeader)`,
+> а не общий `ApiClient` (dio), который не даёт доступа к заголовкам на
+> этом уровне.
+
+**`AnilibriaSourceModule`** — источник видео на официальном публичном API
+[Anilibria/AniLiberty](https://anilibria.top/api/docs/v1) (один из
+источников, названных в docs/documentation.md; открытая экосистема
+сторонних клиентов, ключ не нужен). В отличие от Jikan, Anilibria хостит
+видео сама: эпизоды содержат абсолютные HLS-ссылки трёх качеств
+(`hls_480`/`hls_720`/`hls_1080`), поэтому `resolveEntry` возвращает
+реальный поток конкретной серии.
+
+> Часть каталога (тайтлы, лицензированные не Anilibria) отдаётся через
+> `external_player` — ссылку на сторонний плеер (например, Kodik) без
+> списка эпизодов/HLS. Для таких тайтлов `getEntries` возвращает пустой
+> список; разбор стороннего плеера не входит в этот модуль.
+
+Оба модуля зарегистрированы в `lib/core/parser/parser_provider.dart` и
+подключены в `SearchScreen` (сквозной поиск) и `PlayerScreen`
+(`resolveEntry`).
+
+## Проверка
 
 ```bash
-sudo apt-get install libmpv-dev
+flutter analyze
+flutter test
+flutter build linux --debug
 ```
 
-## Хранилище: sqflite + sqflite_common_ffi
+Дополнительно вручную проверено (headless, через Xvfb):
 
-`sqflite` тоже не имеет реализации под Linux/Windows — та же ситуация, что
-и с `video_player`. На десктопе `SqfliteLocalStorage.open()`
-(`lib/core/storage/impl/sqflite_local_storage.dart`) переключает
-`databaseFactory` на `sqflite_common_ffi` (sqlite3 через FFI), на
-Android/iOS остаётся штатный `sqflite`. `LocalStorage` пробрасывается в
-экраны через `flutter_riverpod` (`local_storage_provider.dart`,
-переопределяется в `main()` после асинхронного открытия БД).
+- Воспроизведение видео через `PackageVideoPlayerEngine`/`media_kit` — на
+  демонстрационном потоке и на реальном HLS-потоке Anilibria.
+- Запись/чтение через `SqfliteLocalStorage` (история, закладки, кеш
+  ресурсов) на sqlite3/FFI.
+- Сквозной сетевой цикл `search → getEntries → resolveEntry` для обоих
+  Source Modules через `ParserEngine`.
+- Навигация `SearchScreen → тап по результату → PlayerScreen`
+  (`/player/:sourceId/:entryId`) виджет-тестом с симуляцией ввода и тапа.
 
-## Первый реальный Source Module: Jikan (MyAnimeList)
+## Дальнейшие шаги
 
-`JikanSourceModule` (`lib/core/parser/impl/jikan_source_module.dart`) ходит
-в живой публичный API [Jikan](https://jikan.moe) — неофициальную
-REST-обёртку над MyAnimeList, без ключей/авторизации. Реальны
-`search`/`getDetails`/`getEntries`; `resolveEntry` возвращает тот же
-демо-ролик, что и раньше — у Jikan просто нет видеохостинга, это честная
-заглушка именно на месте видео. Подключён в `SearchScreen` (реальный
-поиск) и `PlayerScreen` (реальный `resolveEntry`) через
-`parser_provider.dart` (riverpod).
-
-**Найденный и исправленный баг Jikan.** Живые (не кешируемые на их
-стороне) эндпоинты — `/anime?q=` и `/anime/{id}/episodes` — стабильно
-отдают 504, если в запросе присутствует заголовок `Accept-Encoding` (с
-любым значением, даже `identity`) — похоже на баг пережатия ответа на их
-стороне при проксировании MyAnimeList. `dart:io`'s `HttpClient` всегда
-добавляет `Accept-Encoding: gzip`, независимо от `autoUncompress`; убрать
-его можно только явным `request.headers.removeAll(...)` на самом запросе.
-Поэтому модуль ходит через сырой `dart:io HttpClient`, а не через общий
-`ApiClient` (dio), который такого доступа не даёт. Реальный live-тест
-через `ParserEngine` подтвердил: `getDetails`/`getEntries`/`resolveEntry`
-получают настоящие данные (проверено на Fullmetal Alchemist: Brotherhood,
-64 серии); `search` в моменте проверки упирался в отдельный, независимый
-от нас сбой live-текстового поиска на стороне самого MyAnimeList — и
-`ParserEngine.search` корректно изолировал этот сбой, не уронив
-приложение (docs/architecture.md, п.8).
-
-## Запуск
-
-```bash
-# 1. Установить Flutter SDK: https://docs.flutter.dev/get-started/install
-flutter doctor
-
-# 2. Сгенерировать нативные platform-папки (android/ios/windows/linux/macos) —
-#    уже сделано для linux/ и android/ в этом репозитории; для остальных
-#    платформ выполнить по необходимости:
-cd /opt/aniMood
-flutter create --project-name animood --org com.animood .
-
-# 3. Установить зависимости
-flutter pub get
-
-# 4. Запустить
-flutter run                 # на подключённом устройстве/эмуляторе
-flutter run -d linux        # десктоп-таргет (нужен libmpv-dev, см. выше)
-```
-
-## Что уже проверено
-
-Собрано и запущено в headless-окружении (Xvfb, без физического дисплея):
-
-* `flutter analyze` — 0 замечаний.
-* `flutter test` — smoke-тест приложения проходит.
-* `flutter build linux --debug` — собирается и линкуется.
-* Реальное воспроизведение видео через `PackageVideoPlayerEngine`
-  (media_kit/libmpv) на тестовом потоке — подтверждено продвижением
-  позиции воспроизведения и изменением размера видеотекстуры под реальное
-  разрешение ролика.
-* `SqfliteLocalStorage` — реальная запись/чтение истории, закладок и
-  кеша ресурсов (с сериализацией `StreamLink`/`PageImage`/`TextBlock` и
-  подсчётом размера кеша) через sqlite3/FFI; `HomeScreen`/`LibraryScreen`
-  читают эти данные вживую, не заглушки.
-* `JikanSourceModule` — реальные сетевые вызовы через `ParserEngine`
-  (getDetails/getEntries/resolveEntry на живых данных MyAnimeList), плюс
-  `SearchScreen` → тап по результату → `getEntries` → навигация на
-  `/player/:sourceId/:entryId` — проверено виджет-тестом с симуляцией
-  ввода и тапа.
-
-## Что дальше
-
-* Реализовать второй Source Module под реальный видео/манга-хостинг
-  (Anilibria/Kodik/MangaLib и т.п. из docs/documentation.md) — это
-  отдельный вопрос соответствия их ToS, не решённый в рамках Jikan-модуля.
-* Подставить конкретную реализацию `WebViewBypassService`
-  (`webview_flutter`).
-* Реализовать OAuth-аутентификацию в заглушках `lib/core/tracking/providers/*`.
-* Подключить рендер .ass/.srt субтитров поверх `Video` (media_kit не
-  рендерит субтитры сам — см. TODO в `package_video_player_engine.dart`).
-* Реальный download manager для офлайн-кеша (сейчас `cacheResources`
-  сохраняет только метаданные/URL, не скачивает сами файлы).
+- Дополнительные Source Modules под источники из docs/documentation.md
+  (Kodik, MangaLib и др.) — требуют отдельной проверки API/ToS каждого
+  сайта.
+- Реализация `WebViewBypassService` (`webview_flutter`) для источников с
+  защитой Cloudflare/DDoS-Guard.
+- OAuth-аутентификация в заглушках `lib/core/tracking/providers/*`.
+- Рендер .ass/.srt субтитров поверх `Video` (`media_kit` не рендерит
+  субтитры сам — см. TODO в `package_video_player_engine.dart`).
+- Download manager для офлайн-кеша: `cacheResources` сейчас сохраняет
+  только метаданные/URL ресурса, не скачивает сами файлы.
